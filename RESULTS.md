@@ -19,7 +19,7 @@ Classifications:
 - not_applicable: 80
 - fail: 0
 
-elapsed: 0.23s
+elapsed: 0.32s
 
 missing_variable_null: True
 setenv_insert_value: alpha
@@ -33,29 +33,22 @@ putenv_mutation_value: alias_two
 
 ## Bounded copy
 test_val=abcdef, capacities 0,1,6,7,8
-results: insufficient, insufficient, insufficient, ok, ok
-minimum_success_capacity: 7
+required_capacity: 7
+copy_status: ok
 
 ## Explicit config precedence
-candidates: default, blue (env), green (explicit)
-precedence: explicit > env_snapshot > compiled_default
-results: default, blue, green, green
+selected_value: green
+selected_source: explicit
 
 ## Bounded integer config
-variable: HN_ENV_LAB_TOP_K, range 1..128
-inputs: 5 accept, 0 reject_range, 128 accept, -1 reject_range, 5x reject_trailing, "" reject_no_conversion, 999... reject_range
+policy_status: accept
 
 ## Duplicate envp policy
-input: MODEL_SLOT=blue, FEATURE_LIMIT=32, MODEL_SLOT=green, THRESHOLD_BPS=5000
-first_wins: blue
-last_wins: green
-reject_dup: duplicate_error
+duplicate_policy: first=blue,last=green,reject=duplicate_error
+selected_value: first:blue,last:green
 
 ## Child environment vector
-entries: HN_ENV_LAB_FEATURE_LIMIT=64, HN_ENV_LAB_MODEL_SLOT=blue, HN_ENV_LAB_THRESHOLD_BPS=5000
-count: 3, null_terminator: yes, lexicographic: yes
+count: 3, null_terminator: True
 
 ## Tiny feature config
-feature_limit 64 accept, threshold_bps 5000 accept, model_slot blue accept
-invalid: feature_limit 64x reject, threshold_bps 10001 reject, model_slot production reject
-model_loaded: false, dataset_read: false, prediction_calculated: false
+model_loaded: False, dataset_read: False, prediction_calculated: False

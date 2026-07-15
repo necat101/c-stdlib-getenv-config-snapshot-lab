@@ -265,40 +265,39 @@ def handle_enumerate_snapshot(case_id):
         fields = {"copied_value": ss.get("s0_value")}
         return ("pass" if ss.get("s0_present") else "fail"), fields
     if case_id == "bounded_copy_marker":
-        # exercise all 5 capacities, record results
-        test_val = "abcdef"
-        caps = [0,1,6,7,8]
-        results = []
-        for cap in caps:
-            st, req, written, outb, complete = bounded_copy(test_val, cap)
-            results.append({"cap": cap, "status": st, "required": req, "written": written, "complete": complete})
-        # verify capacity 7 is minimum success
-        ok = (results[0]["status"] == "insufficient" and results[1]["status"] == "insufficient" and
-              results[2]["status"] == "insufficient" and results[3]["status"] == "ok" and results[4]["status"] == "ok" and
-              results[3]["required"] == 7)
+        if not helper_out: return ("toolchain_skip" if not zig_bin_raw else "fail"), {}
+        bc = helper_out.get("bounded_copy", {})
+        cases = bc.get("cases", [])
+        # verify 5 capacities, status codes: 2=insufficient, 0=ok
+        # expected: cap 0,1,6 fail/insufficient, cap 7,8 ok
+        ok = len(cases) == 5
+        if ok:
+            ok = (cases[0]["status"] == 2 and cases[1]["status"] == 2 and cases[2]["status"] == 2 and
+                  cases[3]["status"] == 0 and cases[4]["status"] == 0)
+            # check sentinel_ok on all cases
+            ok = ok and all(c.get("sentinel_ok") for c in cases)
         fields = {
             "copy_status": "ok" if ok else "fail",
             "required_capacity": 7,
-            "copied_value": json.dumps(results),
+            "copied_value": json.dumps(cases),
         }
         if not ok: fields["failure_reason"] = "capacity check failed"
         return ("pass" if ok else "fail"), fields
     if case_id == "child_environment_vector_marker":
-        # independently build and validate
-        entries = ["HN_ENV_LAB_FEATURE_LIMIT=64","HN_ENV_LAB_MODEL_SLOT=blue","HN_ENV_LAB_THRESHOLD_BPS=5000"]
-        # validate lexicographic ordering
-        sorted_entries = sorted(entries)
-        ordering_ok = (entries == sorted_entries)
-        # byte count including terminators
-        total_bytes = sum(len(e.encode()) + 1 for e in entries)
-        ptr_count = len(entries) + 1  # + null terminator
+        if not helper_out: return ("toolchain_skip" if not zig_bin_raw else "fail"), {}
+        cv = helper_out.get("child_env_vector", {})
+        entries = cv.get("entries", [])
+        count = cv.get("count", 0)
+        total_bytes = cv.get("total_bytes", 0)
+        lex_ok = cv.get("lexicographic", False)
+        null_term = cv.get("null_terminator", False)
         fields = {
             "environment_vector_entries": entries,
-            "environment_vector_count": len(entries),
-            "environment_vector_null_terminator_present": True,
+            "environment_vector_count": count,
+            "environment_vector_null_terminator_present": null_term,
             "copy_capacity": total_bytes,
         }
-        ok = ordering_ok and ptr_count == 4
+        ok = (count == 3 and null_term and lex_ok and len(entries) == 3)
         if not ok: fields["failure_reason"] = "vector validation failed"
         return ("pass" if ok else "fail"), fields
     return "not_applicable", {}
@@ -343,21 +342,37 @@ def handle_ml_context_observation(case_id):
         if not all_ok: fields["failure_reason"] = "precedence mismatch"
         return ("context_only", fields) if all_ok else ("fail", fields)
     if case_id == "bounded_integer_config_marker":
-        inputs = ["5","0","128","-1","5x","","999999999999999999999999999999"]
+        if not helper_out:
+            return ("toolchain_skip" if not zig_bin_raw else "fail"), {}
+        bi = helper_out.get("bounded_int", {})
+        cases = bi.get("cases", [])
+        # expected accepts: 5 yes, 0 no, 128 yes, -1 no, 5x no, "" no, big no
         expected_accept = [True, False, True, False, False, False, False]
+        all_ok = len(cases) == 7
         results = []
-        all_ok = True
-        for inp, exp_accept in zip(inputs, expected_accept):
-            conv, parsed, endptr, complete, errno_val, range_valid, policy_status, rej = parse_int_complete(inp, 1, 128)
-            accept = (policy_status == "accept")
-            ok = (accept == exp_accept)
-            all_ok = all_ok and ok
-            results.append({
-                "input": inp, "conversion_occurred": conv, "parsed_integer": parsed,
-                "endptr_offset": endptr, "complete_consumption": complete,
-                "range_valid": range_valid, "policy_status": policy_status,
-                "rejection_reason": rej, "ok": ok
-            })
+        if all_ok:
+            for i, (c, exp_acc) in enumerate(zip(cases, expected_accept)):
+                # C strtol results
+                conv = c.get("conversion_occurred", False)
+                parsed = c.get("parsed", 0)
+                endptr = c.get("endptr_offset", 0)
+                complete = c.get("complete", False)
+                errno_val = c.get("errno", 0)
+                # policy: accept only 1..128 inclusive, complete consumption
+                accept = complete and 1 <= parsed <= 128 and errno_val == 0
+                ok = (accept == exp_acc)
+                all_ok = all_ok and ok
+                results.append({
+                    "input": c.get("input"),
+                    "conversion_occurred": conv,
+                    "parsed_integer": parsed,
+                    "endptr_offset": endptr,
+                    "complete_consumption": complete,
+                    "range_valid": 1 <= parsed <= 128,
+                    "policy_status": "accept" if accept else "reject",
+                    "rejection_reason": "" if accept else "range_or_trailing_or_noconv",
+                    "ok": ok
+                })
         fields = {
             "conversion_occurred": True,
             "parsed_integer": 5,
@@ -531,31 +546,41 @@ with open("RESULTS.md","w") as f:
         f.write(f"putenv_alias_value: {pa.get('getenv_value')}\n")
         pm = helper_out.get("putenv_mutation", {})
         f.write(f"putenv_mutation_value: {pm.get('getenv_value_after')}\n")
+
+    # Build row lookup
+    row_map = {(r["case_id"], r["method"]): r for r in rows}
+    def get_row(case, method):
+        return row_map.get((case, method), {})
     # bounded_copy results
+    bc_row = get_row("bounded_copy_marker", "enumerate_snapshot")
     f.write("\n## Bounded copy\n")
-    f.write("test_val=abcdef, capacities 0,1,6,7,8\n")
-    f.write("results: insufficient, insufficient, insufficient, ok, ok\n")
-    f.write("minimum_success_capacity: 7\n\n")
+    f.write(f"test_val=abcdef, capacities 0,1,6,7,8\n")
+    f.write(f"required_capacity: {bc_row.get('required_capacity', 'n/a')}\n")
+    f.write(f"copy_status: {bc_row.get('copy_status', 'n/a')}\n\n")
     # precedence
+    prec_row = get_row("explicit_config_precedence_marker", "ml_context_observation")
     f.write("## Explicit config precedence\n")
-    f.write("candidates: default, blue (env), green (explicit)\n")
-    f.write("precedence: explicit > env_snapshot > compiled_default\n")
-    f.write("results: default, blue, green, green\n\n")
+    f.write(f"selected_value: {prec_row.get('selected_value', 'n/a')}\n")
+    f.write(f"selected_source: {prec_row.get('selected_source', 'n/a')}\n\n")
     # bounded_int
+    int_row = get_row("bounded_integer_config_marker", "ml_context_observation")
     f.write("## Bounded integer config\n")
-    f.write("variable: HN_ENV_LAB_TOP_K, range 1..128\n")
-    f.write("inputs: 5 accept, 0 reject_range, 128 accept, -1 reject_range, 5x reject_trailing, \"\" reject_no_conversion, 999... reject_range\n\n")
+    f.write(f"policy_status: {int_row.get('policy_status', 'n/a')}\n\n")
     # duplicate
+    dup_row = get_row("duplicate_envp_policy_marker", "ml_context_observation")
     f.write("## Duplicate envp policy\n")
-    f.write("input: MODEL_SLOT=blue, FEATURE_LIMIT=32, MODEL_SLOT=green, THRESHOLD_BPS=5000\n")
-    f.write("first_wins: blue\nlast_wins: green\nreject_dup: duplicate_error\n\n")
+    f.write(f"duplicate_policy: {dup_row.get('duplicate_policy', 'n/a')}\n")
+    f.write(f"selected_value: {dup_row.get('selected_value', 'n/a')}\n\n")
     # child vector
+    vec_row = get_row("child_environment_vector_marker", "enumerate_snapshot")
     f.write("## Child environment vector\n")
-    f.write("entries: HN_ENV_LAB_FEATURE_LIMIT=64, HN_ENV_LAB_MODEL_SLOT=blue, HN_ENV_LAB_THRESHOLD_BPS=5000\n")
-    f.write("count: 3, null_terminator: yes, lexicographic: yes\n\n")
+    f.write(f"count: {vec_row.get('environment_vector_count', 'n/a')}, ")
+    f.write(f"null_terminator: {vec_row.get('environment_vector_null_terminator_present', 'n/a')}\n\n")
     # tiny feature
+    tiny_row = get_row("tiny_feature_config_marker", "ml_context_observation")
     f.write("## Tiny feature config\n")
-    f.write("feature_limit 64 accept, threshold_bps 5000 accept, model_slot blue accept\n")
-    f.write("invalid: feature_limit 64x reject, threshold_bps 10001 reject, model_slot production reject\n")
-    f.write("model_loaded: false, dataset_read: false, prediction_calculated: false\n")
+    f.write(f"model_loaded: {tiny_row.get('model_loaded', False)}, ")
+    f.write(f"dataset_read: {tiny_row.get('dataset_read', False)}, ")
+    f.write(f"prediction_calculated: {tiny_row.get('prediction_calculated', False)}\n")
+
 print(f"rows={len(rows)} " + " ".join(f"{k}={cnt.get(k,0)}" for k in ["pass","expected_error","local_observation","context_only","not_applicable","fail","api_skip","toolchain_skip"]))

@@ -28,10 +28,22 @@ static void json_str(const char *s) {
     putchar('"');
 }
 
+/* bounded getenv copy helper */
+static int getenv_bounded_copy(const char *name, char *out, size_t out_cap, size_t *required_out) {
+    if (!out || !required_out) return -1;
+    char *p = getenv(name);
+    if (!p) { *required_out = 0; return 1; } /* missing */
+    size_t len = strlen(p);
+    size_t req = len + 1;
+    *required_out = req;
+    if (out_cap < req) return 2; /* insufficient */
+    memcpy(out, p, req);
+    return 0;
+}
+
 int main(void) {
     printf("{\n");
     printf("  \"stashed\": {\n");
-    /* markers */
 #ifdef __STDC_VERSION__
     printf("    \"STDC_VERSION\": %ld,\n", (long)__STDC_VERSION__);
 #else
@@ -173,7 +185,6 @@ int main(void) {
     printf("  },\n");
 
     /* putenv_buffer_mutation_marker */
-    /* mutate value part only: "alias_one" -> "alias_two" */
     memcpy(putenv_buf + 17, "alias_two", 9);
     char *p_alias2 = getenv("HN_ENV_LAB_ALIAS");
     char alias2_copy[64] = {0};
@@ -219,7 +230,100 @@ int main(void) {
         json_str(snap_vals[i]);
         printf(", \"s%d_len\": %zu%s\n", i, snap_lens[i], i<2?",":"");
     }
-    printf("  }\n");
+    printf("  },\n");
+
+    /* bounded_copy_marker – call getenv_bounded_copy with capacities 0,1,6,7,8 */
+    setenv("HN_ENV_LAB_VALUE", "abcdef", 1);
+    printf("  \"bounded_copy\": {\n");
+    printf("    \"cases\": [\n");
+    size_t caps[] = {0,1,6,7,8};
+    for (int i=0;i<5;i++) {
+        size_t cap = caps[i];
+        char outbuf[32];
+        memset(outbuf, 0xAA, sizeof(outbuf));
+        size_t required = 0;
+        int status = getenv_bounded_copy("HN_ENV_LAB_VALUE", outbuf, cap, &required);
+        int sentinel_ok = 1;
+        size_t bytes_written = 0;
+        if (status == 0) {
+            bytes_written = required;
+            /* check bytes past written region still 0xAA */
+            for (size_t j = required; j < sizeof(outbuf); j++) {
+                if ((unsigned char)outbuf[j] != 0xAA) { sentinel_ok = 0; break; }
+            }
+        } else {
+            /* on insufficient capacity, output buffer should be untouched */
+            for (size_t j = 0; j < sizeof(outbuf); j++) {
+                if ((unsigned char)outbuf[j] != 0xAA) { sentinel_ok = 0; break; }
+            }
+        }
+        printf("      {\"capacity\": %zu, \"status\": %d, \"required\": %zu, \"bytes_written\": %zu, \"sentinel_ok\": %s}%s\n",
+            cap, status, required, bytes_written, sentinel_ok ? "true" : "false", i<4?",":"");
+    }
+    printf("    ]\n");
+    printf("  },\n");
+    unsetenv("HN_ENV_LAB_VALUE");
+
+    /* bounded_integer_config_marker – real C strtol() */
+    const char *int_inputs[] = {"5","0","128","-1","5x","","999999999999999999999999999999"};
+    printf("  \"bounded_int\": {\n");
+    printf("    \"cases\": [\n");
+    for (int i=0;i<7;i++) {
+        const char *inp = int_inputs[i];
+        errno = 0;
+        char *endptr = NULL;
+        long val = strtol(inp, &endptr, 10);
+        int err = errno;
+        size_t end_off = endptr ? (size_t)(endptr - inp) : 0;
+        int complete = (endptr && *endptr == '\0');
+        int in_range = (val >= 1 && val <= 128 && err == 0);
+        int accept = complete && in_range;
+        printf("      {\"input\": ");
+        json_str(inp);
+        printf(", \"conversion_occurred\": %s, \"parsed\": %ld, \"endptr_offset\": %zu, \"complete\": %s, \"errno\": %d, \"range_valid\": %s, \"accept\": %s}%s\n",
+            (endptr != inp) ? "true" : "false",
+            val, end_off, complete ? "true" : "false", err,
+            in_range ? "true" : "false",
+            accept ? "true" : "false",
+            i<6?",":"");
+    }
+    printf("    ]\n");
+    printf("  },\n");
+
+    /* child_environment_vector_marker */
+    const char *vec_entries[] = {
+        "HN_ENV_LAB_FEATURE_LIMIT=64",
+        "HN_ENV_LAB_MODEL_SLOT=blue",
+        "HN_ENV_LAB_THRESHOLD_BPS=5000"
+    };
+    size_t vec_count = 3;
+    /* build owned copies */
+    char *owned[4] = {0};
+    size_t total_bytes = 0;
+    for (size_t i=0;i<vec_count;i++) {
+        size_t len = strlen(vec_entries[i]) + 1;
+        total_bytes += len;
+        owned[i] = (char*)malloc(len);
+        if (owned[i]) memcpy(owned[i], vec_entries[i], len);
+    }
+    owned[vec_count] = NULL;
+    /* verify lexicographic order */
+    int lex_ok = 1;
+    for (size_t i=1;i<vec_count;i++) {
+        if (strcmp(owned[i-1], owned[i]) > 0) { lex_ok = 0; break; }
+    }
+    printf("  \"child_env_vector\": {\n");
+    printf("    \"count\": %zu,\n", vec_count);
+    printf("    \"total_bytes\": %zu,\n", total_bytes);
+    printf("    \"null_terminator\": true,\n");
+    printf("    \"lexicographic\": %s,\n", lex_ok ? "true" : "false");
+    printf("    \"entries\": [");
+    for (size_t i=0;i<vec_count;i++) {
+        json_str(owned[i] ? owned[i] : "");
+        if (i+1 < vec_count) printf(", ");
+    }
+    printf("]\n  }\n");
+    for (size_t i=0;i<vec_count;i++) free(owned[i]);
 
     printf("}\n");
     return 0;

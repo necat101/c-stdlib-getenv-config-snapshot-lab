@@ -5134,7 +5134,7 @@
     "errno_before": null,
     "errno_after": null,
     "getenv_returned_null": null,
-    "copied_value": "[{\"cap\": 0, \"status\": \"insufficient\", \"required\": 7, \"written\": 0, \"complete\": false}, {\"cap\": 1, \"status\": \"insufficient\", \"required\": 7, \"written\": 0, \"complete\": false}, {\"cap\": 6, \"status\": \"insufficient\", \"required\": 7, \"written\": 0, \"complete\": false}, {\"cap\": 7, \"status\": \"ok\", \"required\": 7, \"written\": 6, \"complete\": true}, {\"cap\": 8, \"status\": \"ok\", \"required\": 7, \"written\": 6, \"complete\": true}]",
+    "copied_value": "[{\"capacity\": 0, \"status\": 2, \"required\": 7, \"bytes_written\": 0, \"sentinel_ok\": true}, {\"capacity\": 1, \"status\": 2, \"required\": 7, \"bytes_written\": 0, \"sentinel_ok\": true}, {\"capacity\": 6, \"status\": 2, \"required\": 7, \"bytes_written\": 0, \"sentinel_ok\": true}, {\"capacity\": 7, \"status\": 0, \"required\": 7, \"bytes_written\": 7, \"sentinel_ok\": true}, {\"capacity\": 8, \"status\": 0, \"required\": 7, \"bytes_written\": 7, \"sentinel_ok\": true}]",
     "copied_length": null,
     "copy_capacity": null,
     "required_capacity": 7,
@@ -6002,7 +6002,7 @@
         "complete_consumption": true,
         "range_valid": false,
         "policy_status": "reject",
-        "rejection_reason": "range",
+        "rejection_reason": "range_or_trailing_or_noconv",
         "ok": true
       },
       {
@@ -6024,7 +6024,7 @@
         "complete_consumption": true,
         "range_valid": false,
         "policy_status": "reject",
-        "rejection_reason": "range",
+        "rejection_reason": "range_or_trailing_or_noconv",
         "ok": true
       },
       {
@@ -6035,7 +6035,7 @@
         "complete_consumption": false,
         "range_valid": true,
         "policy_status": "reject",
-        "rejection_reason": "trailing",
+        "rejection_reason": "range_or_trailing_or_noconv",
         "ok": true
       },
       {
@@ -6043,21 +6043,21 @@
         "conversion_occurred": false,
         "parsed_integer": 0,
         "endptr_offset": 0,
-        "complete_consumption": false,
+        "complete_consumption": true,
         "range_valid": false,
         "policy_status": "reject",
-        "rejection_reason": "no_conversion",
+        "rejection_reason": "range_or_trailing_or_noconv",
         "ok": true
       },
       {
         "input": "999999999999999999999999999999",
         "conversion_occurred": true,
-        "parsed_integer": 999999999999999999999999999999,
+        "parsed_integer": 9223372036854775807,
         "endptr_offset": 30,
         "complete_consumption": true,
         "range_valid": false,
         "policy_status": "reject",
-        "rejection_reason": "range",
+        "rejection_reason": "range_or_trailing_or_noconv",
         "ok": true
       }
     ],
