@@ -1,0 +1,12 @@
+env_lab
+env_lab.exe
+env_lab_check
+env_lab_check.exe
+*.o
+*.obj
+zig-cache/
+.zig-cache/
+__pycache__/
+*.pyc
+tmp_*
+*.tmp

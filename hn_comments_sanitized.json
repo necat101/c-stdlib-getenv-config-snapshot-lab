@@ -1,0 +1,142 @@
+[
+  {
+    "id": 38343925,
+    "author": "xxs",
+    "parent": 38342642,
+    "text": "The described problem (thread safety) for a global configuration seems mostly a misunderstanding by the author. The usual case for modifying a global state is: modify once, then proceed (e.g. start new threads). Even if all the calls become thread safe, the behavior would be inconsistent, still.",
+    "type": "comment"
+  },
+  {
+    "id": 38344224,
+    "author": "pitdicker",
+    "parent": 38342642,
+    "text": "This also caused a lot of trouble for time libraries in Rust. The two foundational libraries, chrono and time, rely on localtime_r to get the local time instead of the clock value in UTC. localtime_r reads the TZ environment variable (and optionally others like TZ_DIR). Rust declares it safe to modify the environment, while POSIX declares it unsafe. CVE-2020-26235, RUSTSEC-2020-0071 and RUSTSEC-2020-0159 where opened against the crates. That left the Rust ecosystem with a pretty much unsolvable issue for many months. Chrono went with the solution to parse the timezone database of the OS natively and read the environment using the Rust locks. Time tries to detect if the libc version has thread-safety guarantees to access the environment, and otherwise panics if there are multiple threads. More reading: https://docs.rs/chrono/latest/chrono/#security-advisories",
+    "type": "comment"
+  },
+  {
+    "id": 38344903,
+    "author": "yason",
+    "parent": 38342642,
+    "text": "Come on! Of all C/Posix thread-safety issues in circulation this can plausibly be considered the most moot one. Environment variables are not meant to be an inter-thread communication channel and the documentation that points out setenv() is not thread-safe is very much a fair shot. You rarely, if ever, need to setenv() anything maybe unless you're a shell. For spawning children execve() already takes an envp parameter. For debugging I think I've mostly set in-process environment variables manually from gdb. Further, because environment variables are an interface between the process and its environment you typically read environment variables at start and cache the parsed values in some internal location. If you need to change that global state on the go you should do it using your own internal variables instead of recycling it through the environment and having the program threads repeatedly getenv() the updated values.",
+    "type": "comment"
+  },
+  {
+    "id": 38345791,
+    "author": "jeroenhd",
+    "parent": 38342642,
+    "text": "On Windows you can use GetEnvironmentVariable/SetEnvironmentVariable (on XP and later), which do implement some locking and doesn't run into this issue because GetEnvironmentVariable copies the data out into a caller-supplied buffer. getenv_s was a nice effort, but it failed. I don't really understand why other languages such as Go and Rust decided to call the weird POSIX API rather than implementing their own API, which matches the semantics they expect. In cross platform C you'll be stuck with the outdated POSIX API design, but there's no reason why other languages should accept those same limitations. We're not running on PDP-11s anymore. You can afford a thread-safe hash map in your standard library. Ignore the limitations of the old C library. Twenty years ago, Microsoft released a better API, keep the crashy old API with tons of deprecation warnings (hell, add a compiler flag --enable-broken-c-api-designs) and just provide new APIs that are actually usable in modern programming environments.",
+    "type": "comment"
+  },
+  {
+    "id": 38346026,
+    "author": "hddqsb",
+    "parent": 38345848,
+    "text": "Sure, some applications might require custom higher-level synchronisation, but it's still important for getenv/setenv to be thread-safe (i.e. not crash): - The race might be irrelevant (e.g. simultaneous calls that access different variables are fine). - The application author might not have complete control over all calls to getenv/setenv (e.g. if using a third-party library).",
+    "type": "comment"
+  },
+  {
+    "id": 38346170,
+    "author": "lifthrasiir",
+    "parent": 38342642,
+    "text": "> My understanding is the people responsible for the Unix POSIX standards did not like the design of these functions, so they refused to implement them. And herein lies the actual issue: C has a sh*tton of API issues in its standard library, and people really want to fix as many of them as possible whenever possible, but doing so will destabilize the standard so most of them won't ever be accepted. In the case of Annex K many clearly felt that the size-restricted API alone is not enough, because it is still easy to desynchronize the buffer and the allocated size, and it's a good point if we ignore an obvious counterpoint of the lack of safe `getenv` alternatives in the standard library at all... I wonder about the alternative universe where we have two distinct standards for the C language and C standard library so that the library standard is much easier to fix and adapt.",
+    "type": "comment"
+  },
+  {
+    "id": 38346171,
+    "author": "hddqsb",
+    "parent": 38343925,
+    "text": "It is perfectly reasonable and consistent for one thread to set an environment variable while other threads are reading different environment variables.",
+    "type": "comment"
+  },
+  {
+    "id": 38346289,
+    "author": "lifthrasiir",
+    "parent": 38344224,
+    "text": "To be exact, it was Chrono and time-rs 0.1, while time-rs 0.2 and later was rewritten from the scratch and didn't have that issue... because the new time-rs didn't yet support general time zones other than fixed offsets. The accepted solution for Chrono surprised me a lot, because as far as I reckon it was the hardest solution. (Disclaimer: I'm the original author of Chrono.) But a bad API design doesn't end at environment variables. Many POSIX systems rely on `/etc/localtime` to define the system-wide time zone, and every `localtime` call has to check if the file has been changed or not because there is no way to subscribe to the system-wide time zone change event. Of course there is a cache, but many libcs call at least `stat` per each `localtime` call AFAIK. I had even experienced a possible glibc bug due to the lack of guard against I/O error during this process [1]. Windows got this right, I can't see why POSIX couldn't do the same when it does have an asynchronous signal delivery mechanism anyway. [1] https://news.ycombinator.com/item?id=9953898",
+    "type": "comment"
+  },
+  {
+    "id": 38346528,
+    "author": "hddqsb",
+    "parent": 38332800,
+    "text": "A clever person got that account banned. When you try logging in with that email and a random password, it will fail, and Windows will allow you create a local account. (ref: https://news.ycombinator.com/item?id=37179504 , https://news.ycombinator.com/item?id=33049235 ).",
+    "type": "comment"
+  },
+  {
+    "id": 38348203,
+    "author": "jstimpfle",
+    "parent": 38346525,
+    "text": "Why would you change the path just to call posix_spawnp()? If you want that control, that is an indication that you want to specify the path to the executable, not use PATH.",
+    "type": "comment"
+  },
+  {
+    "id": 38348596,
+    "author": "Joker_vD",
+    "parent": 38342642,
+    "text": "And to re-iterate my point from another thread on setenv, no, \"just don't call setenv() after creating threads\" is not a solution because even if the code you wrote may be single-threaded, your application as a whole is not composed entirely of code written by you: the moment you link against any 3rd-party library, you program can have arbitrarily many threads before it even reaches main().",
+    "type": "comment"
+  },
+  {
+    "id": 38348612,
+    "author": "jstimpfle",
+    "parent": 38346928,
+    "text": "Contrary to fread(), getenv() does not copy data. It returns a pointer to memory that might be invalidated by the following setenv(). In other words, it can't be really made threadsafe -- it's fundamentally a thread-unsafe API. What could be done is offering an alternative, thread-safe API that takes an RW mutex on get/set, and get reads to a user-provided buffer. However, that would be complicated as well because the user can't know the size of any envvar, and getting the size before reading the var is racy. So maybe there needs to be env_lock()/env_unlock() and getenv_unlocked()/setenv_unlocked(). Or a version that locks and strdups() the var. But that still leaves the problem that existing software does not use this API. And really, why would you set envvars instead of global variables? Seriously? A data structure that is a list of KEY=VALUE formatted zero-terminated string pointers? Just don't do it. Use setenv() only at startup and after fork() and before exec(), done.",
+    "type": "comment"
+  },
+  {
+    "id": 38348768,
+    "author": "jstimpfle",
+    "parent": 38345362,
+    "text": "> can and should be used, and thus not be a footgun It can and should be used in the cases where it makes sense, with the restrictions that are documented. It's an API that is fundamentally not thread-safe, you can not use it \"safely\" (in the modern sense of using it after a lobotomy, in any way that the compiler allows) in a multi-threaded context. There are other such APIs, and if those APIs were removed it would hurt a lot of old software that is running perfectly fine.",
+    "type": "comment"
+  },
+  {
+    "id": 38349153,
+    "author": "the_mitsuhiko",
+    "parent": 38348149,
+    "text": "> The lock is not shared across languages. Which just to be clear: it cannot without changing the standard. There is really nothing anyone can do without a change in the standard.",
+    "type": "comment"
+  },
+  {
+    "id": 38349499,
+    "author": "cryptonector",
+    "parent": 38342642,
+    "text": "I'm glad TFA mentions Solaris/Illumos' implementation, so I don't have to.",
+    "type": "comment"
+  },
+  {
+    "id": 38349526,
+    "author": "cryptonector",
+    "parent": 38342642,
+    "text": "I'm glad TFA mentions Solaris/Illumos' implementation, so I don't have to. Java doesn't allow one to set environment variables for the running process, but it does allow setting env vars for processes being spawned. It would be better if all C libraries did what Illumos' does.",
+    "type": "comment"
+  },
+  {
+    "id": 38349618,
+    "author": "cryptonector",
+    "parent": 38342642,
+    "text": "> First, we can make a thread-safe implementation, like Illumos/Solaris. This has some limitations: it leaks memory in setenv(), and is still unsafe if a program uses putenv() or the environ variable. No, `putenv()` in Solaris/Illumos is thread-safe too. And the program should NOT write to `environ`, but as it happens Solaris/Illumos allows that too (but it can cause a lock to be taken in `getenv()`.",
+    "type": "comment"
+  },
+  {
+    "id": 38349664,
+    "author": "cryptonector",
+    "parent": 38342642,
+    "text": "> First, we can make a thread-safe implementation, like Illumos/Solaris. This has some limitations: it leaks memory in setenv(), and is still unsafe if a program uses putenv() or the environ variable. No, `putenv()` in Solaris/Illumos is thread-safe too. And the program should NOT write to `environ`, but as it happens Solaris/Illumos allows that too (but it can cause a lock to be taken in `getenv()`. > Add a function to copy one single environment variable to a user-specified buffer, similar to getenv_s(). Because Windows has one? Fine, but adding a version that allocates the copy would be more convenient. BTW, HN is having problems that are leading to dup comments. I get \"We're having some trouble serving your request. Sorry!\", but the action happens anyways.",
+    "type": "comment"
+  },
+  {
+    "id": 38352497,
+    "author": "andrewla",
+    "parent": 38342642,
+    "text": "A lot of comments in here seem to be saying that \"setenv is rarely used, so we can make setenv threadsafe even if it is costly\", but I think that's missing the point. The thread-safety is in the operators getenv/setenv (and putenv and unsetenv). Thread safety has to apply to all operators, and the functionality of getenv() (which is by far the most commonly used of these operators) is what has to be fixed. You simply cannot make setenv() thread-safe so long as getenv() has its current interface. You need to make getenv() safe first; ideally with a getenv_r() call that fills in a user-supplied buffer. From that point making the rest of the calls thread safe is trivial.",
+    "type": "comment"
+  },
+  {
+    "id": 38377147,
+    "author": "jstimpfle",
+    "parent": 38371893,
+    "text": "Why would you need a generic global key-value store? One with excruciatingly bad performance (apart from the inherent thread-unsafety) that stores keys and values encoded in text form as KEY=VALUE? I've never needed such a thing. Much better to use proper globals, or to use hashes, maps, arrays, ... depending on the context. And why should it be _a_ global store, instead of a structure that you can instantiate as many times as you want (if you really need to, as a global)?",
+    "type": "comment"
+  }
+]
