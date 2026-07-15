@@ -1,12 +1,29 @@
+# executables
 env_lab
 env_lab.exe
 env_lab_check
 env_lab_check.exe
+
+# object files
 *.o
 *.obj
+
+# zig
 zig-cache/
 .zig-cache/
+
+# python
 __pycache__/
 *.pyc
+*.pyo
+
+# temp
 tmp_*
 *.tmp
+*.log
+
+# editors
+.vscode/
+.idea/
+*~
+*.swp
